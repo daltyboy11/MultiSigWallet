@@ -5,7 +5,17 @@ import { ethers } from "hardhat";
 import MultiSigWalletArtifact from "../artifacts/contracts/MultiSigWallet.sol/MultiSigWallet.json";
 import { MultiSigWallet } from "../typechain/MultiSigWallet";
 
+const weeksToSeconds = (weeks: number) => {
+    return weeks * 7 * 24 * 60 * 60;
+}
+
 describe("MultiSigWallet", () => {
+
+    const advanceTime = async (seconds: number) => {
+        await ethers.provider.send("evm_increaseTime", [seconds]);
+        await ethers.provider.send("evm_mine", []); 
+    }
+
     let multiSigWallet: MultiSigWallet;
     let signers: Array<Signer>
 
@@ -54,6 +64,7 @@ describe("MultiSigWallet", () => {
             const tx = await multiSigWallet.connect(signers[0]).submitTransaction(
                 to,
                 value,
+                weeksToSeconds(1),
                 data,
             );
             await tx.wait();
@@ -67,12 +78,16 @@ describe("MultiSigWallet", () => {
             expect(transaction.data).to.equal(data); 
             expect(transaction.executed).to.be.false;
             expect(transaction.numConfirmations).to.equal(numConfirmations);
+            expect(transaction.confirmed).to.be.false;
+            expect(transaction.confirmedAt).to.equal(0);
+            expect(transaction.withdrawalDelay).to.equal(weeksToSeconds(1));
 
             await expect(tx).to.emit(multiSigWallet, "SubmitTransaction").withArgs(
                 await signers[0].getAddress(),
                 0,
                 to,
                 value,
+                weeksToSeconds(1),
                 data,
             );
         });
@@ -82,6 +97,7 @@ describe("MultiSigWallet", () => {
                 multiSigWallet.connect(signers[3]).submitTransaction(
                     await signers[1].getAddress(),
                     ethers.utils.parseEther("1.0"),
+                    0,
                     "0x00"
                 )
             ).to.be.revertedWith("not owner");
@@ -94,6 +110,7 @@ describe("MultiSigWallet", () => {
             const tx = await multiSigWallet.connect(signers[0]).submitTransaction(
                 await signers[3].getAddress(),
                 ethers.utils.parseEther("5"),
+                0,
                 "0x00",
             );
             await tx.wait();
@@ -159,6 +176,7 @@ describe("MultiSigWallet", () => {
             const tx = await multiSigWallet.connect(signers[0]).submitTransaction(
                 await signers[3].getAddress(),
                 ethers.utils.parseEther("5"),
+                weeksToSeconds(1),
                 "0x00",
             );
             await tx.wait();
@@ -190,6 +208,9 @@ describe("MultiSigWallet", () => {
                 value: ethers.utils.parseEther("25")
             });
             await multiSigWallet.connect(signers[1]).confirmTransaction(0);
+
+            await advanceTime(weeksToSeconds(1));
+
             await multiSigWallet.executeTransaction(0);
             await expect(
                 multiSigWallet.connect(signers[1]).revokeConfirmation(0)
@@ -202,12 +223,83 @@ describe("MultiSigWallet", () => {
             ).to.be.revertedWith("tx not confirmed");
         });
 
+        it("should revert if we reach the threshold", async () => {
+            await multiSigWallet.connect(signers[1]).confirmTransaction(0); 
+
+            await advanceTime(weeksToSeconds(1));
+
+            await expect(
+                multiSigWallet.connect(signers[1]).revokeConfirmation(0)
+            ).to.be.revertedWith("tx above the min # of confirms");
+        });
+
         it("should succeeed for owner who has confirmed", async () => {
             const tx = await multiSigWallet.connect(signers[0]).revokeConfirmation(0);
             const transaction = await multiSigWallet.getTransaction(0);
             expect(transaction.numConfirmations).to.equal(0);
             expect(await multiSigWallet.isConfirmed(0, await signers[0].getAddress())).to.be.false;
             await expect(tx).to.emit(multiSigWallet, "RevokeConfirmation").withArgs(
+                await signers[0].getAddress(),
+                0
+            );
+        });
+    });
+
+    describe("executeTransaction", () => {
+        beforeEach(async () => {
+            // Submit a proposal to send 5 ether to signer1's address
+            await multiSigWallet.connect(signers[0]).submitTransaction(
+                await signers[3].getAddress(),
+                ethers.utils.parseEther("5"),
+                weeksToSeconds(2),
+                "0x00",
+            );
+            signers[0].sendTransaction({
+                to: multiSigWallet.address,
+                value: ethers.utils.parseEther("25")
+            }); 
+
+            // Signers 0 and 1 confirm, reaching the threshold
+            for (let i of [0, 1]) {
+                const tx = await multiSigWallet.connect(signers[i]).confirmTransaction(0);
+                await tx.wait();
+            }
+        });
+
+        it("should revert for non owner", async () => {
+            await expect(
+                multiSigWallet.connect(signers[3]).executeTransaction(0)
+            ).to.be.revertedWith("not owner");
+        });
+
+        it("should revert if transaction doesn't exist", async () => {
+            await expect(
+                multiSigWallet.connect(signers[0]).executeTransaction(1)
+            ).to.be.revertedWith("tx does not exist");
+        });
+
+        it("should revert if already executed", async () => {
+            await advanceTime(weeksToSeconds(3));
+            await multiSigWallet.connect(signers[0]).executeTransaction(0);
+            await expect(
+                multiSigWallet.connect(signers[0]).executeTransaction(0)
+            ).to.be.revertedWith("tx already executed");
+        });
+
+        it("should revert for early execution", async () => {
+            // const recipientBalanceBefore = await signers[3].getBalance();
+            await expect(
+                multiSigWallet.connect(signers[0]).executeTransaction(0)
+            ).to.be.revertedWith("tx execution too early");
+            // const recipientBalanceAfter = await signers[3].getBalance();
+        });
+
+        it("should succeed :)", async () => {
+            await advanceTime(weeksToSeconds(2));
+            const tx = await multiSigWallet.connect(signers[0]).executeTransaction(0);
+            const transaction = await multiSigWallet.getTransaction(0);
+            expect(transaction.executed).to.be.true;
+            expect(tx).to.emit(multiSigWallet, "ExecuteTransaction").withArgs(
                 await signers[0].getAddress(),
                 0
             );

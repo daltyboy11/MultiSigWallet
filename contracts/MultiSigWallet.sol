@@ -8,6 +8,7 @@ contract MultiSigWallet {
         uint indexed txIndex,
         address indexed to,
         uint value,
+        uint withdrawalDelay,
         bytes data
     );
     event ConfirmTransaction(address indexed owner, uint indexed txIndex);
@@ -16,13 +17,16 @@ contract MultiSigWallet {
 
     address[] public owners;
     mapping(address => bool) public isOwner;
-    uint public numConfirmationsRequired;
+    uint public immutable numConfirmationsRequired;
 
     struct Transaction {
         address to;
         uint value;
         bytes data;
+        bool confirmed;
+        uint confirmedAt;
         bool executed;
+        uint withdrawalDelay;
         uint numConfirmations;
     }
 
@@ -48,6 +52,14 @@ contract MultiSigWallet {
 
     modifier notConfirmed(uint _txIndex) {
         require(!isConfirmed[_txIndex][msg.sender], "tx already confirmed");
+        _;
+    }
+
+    modifier underConfirmationThreshold(uint _txIndex) {
+        require(
+            transactions[_txIndex].numConfirmations < numConfirmationsRequired,
+            "tx above the min # of confirms"
+        );
         _;
     }
 
@@ -79,6 +91,7 @@ contract MultiSigWallet {
     function submitTransaction(
         address _to,
         uint _value,
+        uint _withdrawalDelay,
         bytes memory _data
     ) public onlyOwner {
         uint txIndex = transactions.length;
@@ -88,12 +101,22 @@ contract MultiSigWallet {
                 to: _to,
                 value: _value,
                 data: _data,
+                confirmed: false,
+                confirmedAt: 0,
                 executed: false,
+                withdrawalDelay: _withdrawalDelay,
                 numConfirmations: 0
             })
         );
 
-        emit SubmitTransaction(msg.sender, txIndex, _to, _value, _data);
+        emit SubmitTransaction(
+            msg.sender,
+            txIndex,
+            _to,
+            _value,
+            _withdrawalDelay,
+            _data
+        );
     }
 
     function confirmTransaction(uint _txIndex)
@@ -106,6 +129,10 @@ contract MultiSigWallet {
         Transaction storage transaction = transactions[_txIndex];
         transaction.numConfirmations += 1;
         isConfirmed[_txIndex][msg.sender] = true;
+        if (transaction.numConfirmations >= numConfirmationsRequired) {
+            transaction.confirmed = true;
+            transaction.confirmedAt = block.timestamp;
+        }
 
         emit ConfirmTransaction(msg.sender, _txIndex);
     }
@@ -123,6 +150,11 @@ contract MultiSigWallet {
             "cannot execute tx"
         );
 
+        require(
+            block.timestamp > transaction.confirmedAt + transaction.withdrawalDelay,
+            "tx execution too early"
+        );
+
         transaction.executed = true;
 
         (bool success, ) = transaction.to.call{value: transaction.value}(
@@ -138,6 +170,7 @@ contract MultiSigWallet {
         onlyOwner
         txExists(_txIndex)
         notExecuted(_txIndex)
+        underConfirmationThreshold(_txIndex)
     {
         Transaction storage transaction = transactions[_txIndex];
 
@@ -164,7 +197,10 @@ contract MultiSigWallet {
             address to,
             uint value,
             bytes memory data,
+            bool confirmed,
+            uint confirmedAt,
             bool executed,
+            uint withdrawalDelay,
             uint numConfirmations
         )
     {
@@ -174,7 +210,10 @@ contract MultiSigWallet {
             transaction.to,
             transaction.value,
             transaction.data,
+            transaction.confirmed,
+            transaction.confirmedAt,
             transaction.executed,
+            transaction.withdrawalDelay,
             transaction.numConfirmations
         );
     }
