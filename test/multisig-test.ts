@@ -213,4 +213,54 @@ describe("MultiSigWallet", () => {
             );
         });
     });
+
+    describe("executeTransaction", () => {
+        beforeEach(async () => {
+            // Submit a proposal to send 5 ether to signer1's address
+            await multiSigWallet.connect(signers[0]).submitTransaction(
+                await signers[3].getAddress(),
+                ethers.utils.parseEther("5"),
+                "0x00",
+            );
+            signers[0].sendTransaction({
+                to: multiSigWallet.address,
+                value: ethers.utils.parseEther("25")
+            }); 
+
+            // Signers 0 and 1 confirm, reaching the threshold
+            for (let i of [0, 1]) {
+                const tx = await multiSigWallet.connect(signers[i]).confirmTransaction(0);
+                await tx.wait();
+            }
+        });
+
+        it("should revert for non owner", async () => {
+            await expect(
+                multiSigWallet.connect(signers[3]).executeTransaction(0)
+            ).to.be.revertedWith("not owner");
+        });
+
+        it("should revert if transaction doesn't exist", async () => {
+            await expect(
+                multiSigWallet.connect(signers[0]).executeTransaction(1)
+            ).to.be.revertedWith("tx does not exist");
+        });
+
+        it("should revert if already executed", async () => {
+            await multiSigWallet.connect(signers[0]).executeTransaction(0);
+            await expect(
+                multiSigWallet.connect(signers[0]).executeTransaction(0)
+            ).to.be.revertedWith("tx already executed");
+        });
+
+        it("should succeed :)", async () => {
+            const tx = await multiSigWallet.connect(signers[0]).executeTransaction(0);
+            const transaction = await multiSigWallet.getTransaction(0);
+            expect(transaction.executed).to.be.true;
+            expect(tx).to.emit(multiSigWallet, "ExecuteTransaction").withArgs(
+                await signers[0].getAddress(),
+                0
+            );
+        });
+    });
 });
