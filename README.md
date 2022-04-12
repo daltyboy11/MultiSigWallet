@@ -4,6 +4,17 @@ contract from Solidity By Example.
 
 Each branch has different modifications and experiments.
 
+## Getting started
+Clone the repo, checkout the relevant branch, and install dependencies, compile, and test
+```
+git clone git@github.com:daltyboy11/MultiSigWallet.git
+git checkout multi-call
+npm install
+npx hardhat clean
+npx hardhat compile
+npx hardhat test
+```
+
 ## `main` branch
 This is just the original contract with unit tests added
 
