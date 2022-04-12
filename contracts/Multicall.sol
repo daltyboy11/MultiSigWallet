@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./MultiSigWallet.sol";
 
 contract MultiCall is Ownable {
 
@@ -14,11 +15,11 @@ contract MultiCall is Ownable {
     constructor() Ownable() {}
 
     function multiCall(
-        address payable[] calldata targets,
-        bytes[] calldata payloads,
-        uint[] calldata etherAmounts
+        address payable[] memory targets,
+        bytes[] memory payloads,
+        uint[] memory etherAmounts
     )
-        external
+        public
         payable
         returns (bytes[] memory results)
     {
@@ -35,5 +36,32 @@ contract MultiCall is Ownable {
             }
             results[i] = res;
         }
+    }
+
+    function submitAndConfirm(
+        address payable multiSigAddress,
+        address txRecipient,
+        uint txValue,
+        bytes memory txData
+    ) external {
+        // If we have access to the contract code we can get the selector directly from the contract object
+        bytes4 submitSelector = MultiSigWallet.submitTransaction.selector;
+        bytes memory submitPayload = abi.encodeWithSelector(submitSelector, txRecipient, txValue, txData);
+
+        // If we don't have access to the contract we can derive the selector from the function prototype
+        bytes4 confirmSelector = bytes4(keccak256("confirmTransaction(uint256)"));
+        bytes memory confirmPayload = abi.encodeWithSelector(confirmSelector, 0);
+
+        address payable[] memory targets = new address payable[](2);
+        targets[0] = multiSigAddress;
+        targets[1] = multiSigAddress;
+
+        bytes[] memory payloads = new bytes[](2);
+        payloads[0] = submitPayload;
+        payloads[1] = confirmPayload;
+
+        uint[] memory ethAmounts = new uint[](2);
+
+        multiCall(targets, payloads, ethAmounts);
     }
 }
