@@ -51,7 +51,10 @@ contract MultiCall is Ownable {
         address txRecipient,
         uint txValue,
         bytes memory txData
-    ) external {
+    )
+        external
+        onlyOwner
+    {
         // If we have access to the contract code we can get the selector directly from the contract object
         bytes4 submitSelector = MultiSigWallet.submitTransaction.selector;
         bytes memory submitPayload = abi.encodeWithSelector(submitSelector, txRecipient, txValue, txData);
