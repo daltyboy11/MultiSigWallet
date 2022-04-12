@@ -14,6 +14,14 @@ contract MultiCall is Ownable {
 
     constructor() Ownable() {}
 
+    /// @notice Perform multiple calls one after another. Call `i` is sent
+    /// to address `targets[i]` with calldata `payloads[i]` and ether amount
+    /// `etherAmounts[i]`. The transaction fails if any call reverts.
+    ///
+    /// @param targets addresses to call
+    /// @param payloads calldata for each call
+    /// @param etherAmounts amount of ether to send with each call
+    /// @return results array where `results[i]` is the result of call `i`
     function multiCall(
         address payable[] memory targets,
         bytes[] memory payloads,

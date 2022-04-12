@@ -33,7 +33,7 @@ describe("Multicall", () => {
         await deployMultiSig();
     })
 
-    describe.only("when building payloads in Solidity", () => {
+    describe("when building payloads in Solidity", () => {
         it("should submit and confirm in a single transaction", async () => {
             await multiCall.submitAndConfirm(
                 multiSigWallet.address,
